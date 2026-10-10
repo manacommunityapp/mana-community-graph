@@ -77,16 +77,25 @@ public class RecommendationService {
                         .build());
             }
         } else {
-            // General community popular sports
-            list.add(RecommendationItemDto.builder()
-                    .id("SPORT-POPULAR")
-                    .type(RecommendationType.SPORT)
-                    .title("Community Badminton & Cricket Club")
-                    .subtitle("Over 35 residents play regularly in the sports complex")
-                    .reason("Popular sport in your community")
-                    .matchScore(0.80)
-                    .actionUrl("/sports/activities")
-                    .build());
+            // General community popular sports from real graph relationships
+            List<Object[]> popularSports = relationshipRepository.findPopularTargets(
+                    communityId, RelationshipType.MEMBER_OF, GraphEntityType.SPORT);
+
+            for (Object[] row : popularSports) {
+                String sportId = row[0] != null ? row[0].toString() : "UNKNOWN";
+                String sportName = row[1] != null ? row[1].toString() : sportId;
+                long count = row[2] instanceof Number ? ((Number) row[2]).longValue() : 0L;
+
+                list.add(RecommendationItemDto.builder()
+                        .id("SPORT-" + sportId)
+                        .type(RecommendationType.SPORT)
+                        .title("Community " + sportName + " Club")
+                        .subtitle(count + " residents actively participate in your community")
+                        .reason("Popular sport in your community")
+                        .matchScore(0.80)
+                        .actionUrl("/sports/activities?sport=" + sportName)
+                        .build());
+            }
         }
         return list;
     }
@@ -94,33 +103,91 @@ public class RecommendationService {
     // ─── EVENT RECOMMENDATIONS ───────────────────────────────────────────────
 
     public List<RecommendationItemDto> getRecommendedEvents(Long userId, Long communityId) {
-        return List.of(
-                RecommendationItemDto.builder()
-                        .id("EVT-101")
-                        .type(RecommendationType.EVENT)
-                        .title("Community Monsoon Fest & Cultural Night")
-                        .subtitle("Clubhouse Amphitheatre • Saturday 6:00 PM")
-                        .reason("Trending community event (42 families registered)")
-                        .matchScore(0.90)
-                        .actionUrl("/events/101")
-                        .build()
-        );
+        String uid = userId.toString();
+        // Fetch events the user already registered for so we don't redundantly recommend them
+        Set<String> alreadyRegisteredEventIds = relationshipRepository
+                .findByCommunityIdAndSourceTypeAndSourceIdAndRelationshipType(
+                        communityId, GraphEntityType.USER, uid, RelationshipType.REGISTERED_FOR)
+                .stream()
+                .map(GraphRelationship::getTargetId)
+                .collect(Collectors.toSet());
+
+        // Check user interests / clubs to personalize scoring
+        Set<String> userInterests = relationshipRepository
+                .findByCommunityIdAndSourceTypeAndSourceIdAndRelationshipType(
+                        communityId, GraphEntityType.USER, uid, RelationshipType.INTERESTED_IN)
+                .stream()
+                .map(r -> r.getTargetName().toLowerCase(Locale.ROOT))
+                .collect(Collectors.toSet());
+
+        List<Object[]> popularEvents = relationshipRepository.findPopularTargets(
+                communityId, RelationshipType.REGISTERED_FOR, GraphEntityType.EVENT);
+
+        List<RecommendationItemDto> list = new ArrayList<>();
+        for (Object[] row : popularEvents) {
+            String eventId = row[0] != null ? row[0].toString() : "";
+            if (alreadyRegisteredEventIds.contains(eventId)) {
+                continue;
+            }
+            String eventName = row[1] != null ? row[1].toString() : "Community Event";
+            long attendeeCount = row[2] instanceof Number ? ((Number) row[2]).longValue() : 0L;
+
+            boolean hasInterestMatch = userInterests.stream()
+                    .anyMatch(interest -> eventName.toLowerCase(Locale.ROOT).contains(interest));
+            double matchScore = hasInterestMatch ? 0.95 : 0.85;
+
+            String recId = eventId.startsWith("EVT-") ? eventId : "EVT-" + eventId;
+
+            list.add(RecommendationItemDto.builder()
+                    .id(recId)
+                    .type(RecommendationType.EVENT)
+                    .title(eventName)
+                    .subtitle("Community Event • " + attendeeCount + " neighbors registered")
+                    .reason(hasInterestMatch ? "Matches your interests (" + attendeeCount + " neighbors registered)"
+                            : "Trending community event (" + attendeeCount + " neighbors registered)")
+                    .matchScore(matchScore)
+                    .actionUrl("/events/" + eventId)
+                    .build());
+        }
+        return list;
     }
 
     // ─── TRIP RECOMMENDATIONS ────────────────────────────────────────────────
 
     public List<RecommendationItemDto> getRecommendedTrips(Long userId, Long communityId) {
-        return List.of(
-                RecommendationItemDto.builder()
-                        .id("TRIP-201")
-                        .type(RecommendationType.TRIP)
-                        .title("Weekend Trek to Ananthagiri Hills")
-                        .subtitle("Community group trip with 40-seater luxury bus")
-                        .reason("18 neighbors from your tower are interested")
-                        .matchScore(0.88)
-                        .actionUrl("/trips/201")
-                        .build()
-        );
+        String uid = userId.toString();
+        Set<String> bookedTripIds = relationshipRepository
+                .findByCommunityIdAndSourceTypeAndSourceIdAndRelationshipType(
+                        communityId, GraphEntityType.USER, uid, RelationshipType.BOOKED)
+                .stream()
+                .map(GraphRelationship::getTargetId)
+                .collect(Collectors.toSet());
+
+        List<Object[]> popularTrips = relationshipRepository.findPopularTargets(
+                communityId, RelationshipType.BOOKED, GraphEntityType.TRIP);
+
+        List<RecommendationItemDto> list = new ArrayList<>();
+        for (Object[] row : popularTrips) {
+            String tripId = row[0] != null ? row[0].toString() : "";
+            if (bookedTripIds.contains(tripId)) {
+                continue;
+            }
+            String tripName = row[1] != null ? row[1].toString() : "Community Trip";
+            long participantCount = row[2] instanceof Number ? ((Number) row[2]).longValue() : 0L;
+
+            String recId = tripId.startsWith("TRIP-") ? tripId : "TRIP-" + tripId;
+
+            list.add(RecommendationItemDto.builder()
+                    .id(recId)
+                    .type(RecommendationType.TRIP)
+                    .title(tripName)
+                    .subtitle("Community group trip (" + participantCount + " participants joined)")
+                    .reason(participantCount + " neighbors from your community have booked this trip")
+                    .matchScore(0.88)
+                    .actionUrl("/trips/" + tripId)
+                    .build());
+        }
+        return list;
     }
 
     // ─── HOME CHEF RECOMMENDATIONS ───────────────────────────────────────────
@@ -134,8 +201,9 @@ public class RecommendationService {
             try {
                 Long chefUserId = Long.parseLong(r.getSourceId());
                 if (privacyService.isRelationshipDiscoverable(chefUserId, communityId, RelationshipType.HOME_CHEF, GraphEntityType.HOME_CHEF)) {
+                    String chefId = r.getSourceId().startsWith("CHEF-") ? r.getSourceId() : "CHEF-" + r.getSourceId();
                     list.add(RecommendationItemDto.builder()
-                            .id("CHEF-" + r.getSourceId())
+                            .id(chefId)
                             .type(RecommendationType.HOME_CHEF)
                             .title(r.getSourceName() + " (Home Kitchen)")
                             .subtitle(r.getTargetName() + " • Fresh homemade meals & treats")
@@ -146,35 +214,45 @@ public class RecommendationService {
                 }
             } catch (Exception ignored) {}
         }
-
-        if (list.isEmpty()) {
-            list.add(RecommendationItemDto.builder()
-                    .id("CHEF-DISCOVER")
-                    .type(RecommendationType.HOME_CHEF)
-                    .title("Authentic Home Food & Tiffins")
-                    .subtitle("Order delicious home cooked food prepared by neighbors")
-                    .reason("4 home chefs available in your society")
-                    .matchScore(0.85)
-                    .actionUrl("/food/menu")
-                    .build());
-        }
         return list;
     }
 
     // ─── GROUP BUY RECOMMENDATIONS ───────────────────────────────────────────
 
     public List<RecommendationItemDto> getRecommendedGroupBuys(Long userId, Long communityId) {
-        return List.of(
-                RecommendationItemDto.builder()
-                        .id("GB-501")
-                        .type(RecommendationType.GROUP_BUY)
-                        .title("Organic Mango Farm Bulk Order")
-                        .subtitle("Tier 3 Price: ₹450/box (Current orders: 38/50 boxes)")
-                        .reason("12 households in your tower joined this group buy")
-                        .matchScore(0.87)
-                        .actionUrl("/group-marketplace/deals/501")
-                        .build()
-        );
+        String uid = userId.toString();
+        Set<String> joinedGroupBuyIds = relationshipRepository
+                .findByCommunityIdAndSourceTypeAndSourceIdAndRelationshipType(
+                        communityId, GraphEntityType.USER, uid, RelationshipType.BOUGHT)
+                .stream()
+                .map(GraphRelationship::getTargetId)
+                .collect(Collectors.toSet());
+
+        List<Object[]> popularGroupBuys = relationshipRepository.findPopularTargets(
+                communityId, RelationshipType.BOUGHT, GraphEntityType.GROUP_BUY);
+
+        List<RecommendationItemDto> list = new ArrayList<>();
+        for (Object[] row : popularGroupBuys) {
+            String gbId = row[0] != null ? row[0].toString() : "";
+            if (joinedGroupBuyIds.contains(gbId)) {
+                continue;
+            }
+            String gbName = row[1] != null ? row[1].toString() : "Community Bulk Order";
+            long buyersCount = row[2] instanceof Number ? ((Number) row[2]).longValue() : 0L;
+
+            String recId = gbId.startsWith("GB-") ? gbId : "GB-" + gbId;
+
+            list.add(RecommendationItemDto.builder()
+                    .id(recId)
+                    .type(RecommendationType.GROUP_BUY)
+                    .title(gbName)
+                    .subtitle("Bulk Order Deal • " + buyersCount + " orders joined")
+                    .reason(buyersCount + " households in your community joined this group buy")
+                    .matchScore(0.87)
+                    .actionUrl("/group-marketplace/deals/" + gbId)
+                    .build());
+        }
+        return list;
     }
 
     // ─── COMMUNITY PROFESSIONALS CARDS ───────────────────────────────────────

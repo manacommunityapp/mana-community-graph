@@ -1,6 +1,8 @@
 spring:
+  main:
+    allow-bean-definition-overriding: true
   datasource:
-    url: jdbc:h2:mem:graphtest;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    url: jdbc:h2:mem:graphtest;DB_CLOSE_DELAY=-1;MODE=PostgreSQL;INIT=CREATE SCHEMA IF NOT EXISTS manacommunity
     username: sa
     password:
     driver-class-name: org.h2.Driver
@@ -17,9 +19,13 @@ spring:
 
 app:
   jwt:
-    secret: test-secret-key-for-unit-tests-only-32-chars-min
+    secret: 9a4f8c2e1b6d3a7e5f8b0c4d2e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f
     expiration-ms: 900000
     issuer: mana-community
+  security:
+    jwt:
+      secret: 9a4f8c2e1b6d3a7e5f8b0c4d2e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f
+      expiration-ms: 900000
   cors:
     allowed-origins:
-      - http://localhost:3000
+      - '*'

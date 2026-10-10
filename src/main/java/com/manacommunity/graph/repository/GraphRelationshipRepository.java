@@ -59,4 +59,12 @@ public interface GraphRelationshipRepository extends JpaRepository<GraphRelation
             @Param("relType") RelationshipType relType,
             @Param("visibilities") List<GraphVisibility> visibilities,
             @Param("query") String query);
+
+    @Query("SELECT r.targetId, r.targetName, count(r) FROM GraphRelationship r " +
+           "WHERE r.communityId = :communityId AND r.relationshipType = :relType AND r.targetType = :targetType " +
+           "GROUP BY r.targetId, r.targetName ORDER BY count(r) DESC")
+    List<Object[]> findPopularTargets(
+            @Param("communityId") Long communityId,
+            @Param("relType") RelationshipType relType,
+            @Param("targetType") GraphEntityType targetType);
 }
